@@ -37,11 +37,8 @@ function listInventory(fCallback) {
                     console.log('   ---------------------------------------------   ');
                 });
 
-                // release connection since we have the data
-                connection.release();
-
                 // callback to handle the data once it's retrieved and reported
-                fCallback(data);
+                fCallback(data, connection);
             }
             else {
                 // loop through the data array and list all products in the CLI
@@ -55,6 +52,9 @@ function listInventory(fCallback) {
 
                 // release connection since we have the data
                 connection.release();
+
+                // loop back to options menu
+                managerOptions();
             }
         });
     });
@@ -62,7 +62,9 @@ function listInventory(fCallback) {
 
 // Function to get the order from the customer
 // pass in the data array so it can be checked by the checkID function
-let placeOrder = function (pData) {
+let placeOrder = function (pData, pConnection) {
+
+    // create questions for inquirer
     let questions = [
         {
             type: 'input',
@@ -91,13 +93,16 @@ let placeOrder = function (pData) {
 
     ];
 
+    // run the inquirer prompt, then process the order
     inquirer.prompt(questions).then(function (answers) {
-        processOrder(answers, pData);
+        processOrder(answers, pData, pConnection);
     });
 };
 
 // process the order based on the inquirer results
-function processOrder(pOrder, pData) {
+function processOrder(pOrder, pData, pConnection) {
+
+    // create all of the variables needed to build the CLI print out
     let dataIndex = parseInt(pOrder.selection) - 1;
     let stockQuantity = pData[dataIndex].stock_quantity;
     let desiredQuantity = parseInt(pOrder.quantity);
@@ -105,39 +110,33 @@ function processOrder(pOrder, pData) {
 
     // if we have enough in stock, create the order
     if (desiredQuantity <= stockQuantity) {
-        // sell to the customer
-        console.log('Processing order...');
+        // set up additional variables for the order (how many, total price)
+        let newQuantity = stockQuantity - desiredQuantity;
+        let orderValue = desiredQuantity * pData[dataIndex].price;
 
-        // get new connection
-        sqlPool.getConnection(function (err, connection) {
-            if (err) { console.log(err); return;}
+        // query the connection to update the stock value
+        pConnection.query('UPDATE products SET stock_quantity = ? WHERE item_id = ?', [newQuantity, pOrder.selection],
+            function (err, data, fields) {
+                if (err) { console.log(err); pConnection.release(); }
+                else {
+                    // print out the 'receipt' to the CLI
+                    console.log('<--------------[ Order Receipt ]-------------->');
+                    console.log(`  ${desiredQuantity}x ${itemName} \n`);
+                    console.log(`  Total cost: $${orderValue}`);
+                    console.log(' ---------------------------------------------');
 
-            // set up variables for the order (how many, and the total price)
-            let newQuantity = stockQuantity - desiredQuantity;
-            let orderValue = desiredQuantity * pData[dataIndex].price;
-
-            // query the connection to update the stock value
-            connection.query('UPDATE products SET stock_quantity = ? WHERE item_id = ?', [newQuantity, pOrder.selection],
-                function (err, data, fields) {
-                    if (err) { console.log(err); connection.release(); }
-                    else {
-                        console.log('<--------------[ Order Receipt ]-------------->');
-                        console.log(`  ${desiredQuantity}x ${itemName} \n`);
-                        console.log(`  Total cost: $${orderValue}`);
-                        console.log(' ---------------------------------------------');
-
-                        connection.release();
-                    }
-            });
+                    // release the connection since we're done
+                    pConnection.release();
+                }
         });
     }
     // otherwise if we dont have enough in stock alert and don't sell
     else {
         console.log(`We don't have enough ${itemName} in stock!`);
-    }
 
-    // close pool since we're done.
-    // sqlPool.end();
+        // release the connection since we're done
+        pConnection.release();
+    }
 }
 
 // helper function to check if the input ID is within the product array
@@ -161,7 +160,7 @@ function managerOptions () {
             type: 'list',
             name: 'action',
             message: 'What would you like to do?',
-            choices: ['View Products for Sale', 'View Low Inventory', 'Add to Inventory', 'Add New Product']
+            choices: ['View Products for Sale', 'View Low Inventory', 'Add to Inventory', 'Add New Product', 'Log Out']
         }
     ]).then(function (answer) {
         switch (answer.action) {
@@ -170,9 +169,11 @@ function managerOptions () {
             case 'View Low Inventory':
                 return lowInventory();
             case 'Add to Inventory':
-                break;
+                return listInventory(addInventory);
             case 'Add New Product':
-                break;
+                return addNewProduct();
+            case 'Log Out':
+                return sqlPool.end();
             default:
                 console.log('Error in menu selection... Aborting.');
                 sqlPool.end();
@@ -182,18 +183,15 @@ function managerOptions () {
 }
 
 // show products with inventory less than 5
-function lowInventory() {
+function lowInventory () {
+    // get a connection and query products table
     sqlPool.getConnection(function (err, connection) {
         connection.query('SELECT * FROM products WHERE stock_quantity < 5',
             function (err, data, fields) {
-                if (err) {
-                    console.log(err);
-                    connection.release();
-                }
+                if (err) { console.log(err); connection.release(); }
 
-                // if a callback is provided we can assume this is Customer level
+                // loop through the data array and list all products in the CLI
                 else {
-                    // loop through the data array and list all products in the CLI
                     console.log('<--------------[ Low Inventory]-------------->');
                     console.log('   ----------------------------------------   ');
                     data.forEach(function (each) {
@@ -203,11 +201,84 @@ function lowInventory() {
 
                     // release connection since we have the data
                     connection.release();
+
+                    // loop back to options menu
+                    managerOptions();
                 }
             });
     });
 }
 
+// function to receive inventory into the store's DB
+function addInventory (pData, pConnection) {
+    // create inquirer questions
+    let questions = [
+        {
+            type: 'input',
+            name: 'selection',
+            message: 'Product ID you wish to add to:',
+            validate: function (value) {
+                // check if the ID is in the array and can be parsed
+                if (checkID(pData, value)) {
+                    return true;
+                }
+                return 'Please enter a valid ID.';
+            }
+        },
+        {
+            type: 'input',
+            name: 'quantity',
+            message: 'How many units do you want to add?',
+            validate: function (value) {
+                // check if the input can be parsed as an Int
+                if (parseInt(value)) {
+                    return true;
+                }
+                return 'Please enter a valid quantity.';
+            }
+        }];
+
+    // run inquirer prompt to find the target item and the number of units to add
+    // update the table accordingly
+    inquirer.prompt(questions).then(function (answers) {
+        pConnection.query('UPDATE products SET stock_quantity = stock_quantity + ? WHERE item_id = ?', [answers.quantity, answers.selection],
+            function (err, data, fields) {
+                if (err) { console.log(err); pConnection.release(); }
+                else {
+                    // create the CLI response to adding inventory
+                    console.log('<--------------[ Added Inventory]-------------->');
+                    console.log(`    ${answers.quantity} unit(s) added to ${pData[answers.selection-1].product_name}`);
+                    console.log('   ----------------------------------------   ');
+
+                    // release the connection since we're done
+                    pConnection.release();
+
+                    // loop back to options menu
+                    managerOptions();
+                }
+            });
+    });
+}
+
+// function to add new product to the DB
+function addNewProduct() {
+    inquirer.prompt([
+        {
+            // product name
+        },
+        {
+            // product department
+        },
+        {
+            // product price
+        },
+        {
+            // product starting stock
+        }
+    ]).then(function () {
+
+    });
+}
 
 // ---------------------------------------------- //
 //                  RUN NODE                      //
