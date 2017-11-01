@@ -127,6 +127,7 @@ function processOrder(pOrder, pData, pConnection) {
 
                     // release the connection since we're done
                     pConnection.release();
+                    sqlPool.end();
                 }
         });
     }
@@ -136,6 +137,7 @@ function processOrder(pOrder, pData, pConnection) {
 
         // release the connection since we're done
         pConnection.release();
+        sqlPool.end();
     }
 }
 
