@@ -262,6 +262,7 @@ function addInventory (pData, pConnection) {
 
 // function to add new product to the DB
 function addNewProduct() {
+    // get the product data
     inquirer.prompt([
         {
             // product name
@@ -288,11 +289,14 @@ function addNewProduct() {
             message: 'How many units to start with?'
         }
     ]).then(function (answers) {
+        // open the connection
         sqlPool.getConnection(function (err, connection) {
+            // insert query
             connection.query('INSERT INTO bamazon.products (product_name, department_name, price, stock_quantity) VALUES (?, ?, ?, ?)',
                 [answers.name, answers.dept, answers.price, answers.stock], function (err, data, fields) {
                     if (err) { console.log(err); connection.release(); }
 
+                    // log it's bee done
                     console.log(`${answers.stock} of ${answers.name} have been created in inventory`);
 
                     // release connection since we're done
@@ -300,6 +304,42 @@ function addNewProduct() {
 
                     // loop back to options menu
                     managerOptions();
+            });
+        });
+    });
+}
+
+
+// function to check if the manager credentials are in the DB
+function checkCreds() {
+    inquirer.prompt([
+        {
+            type: 'input',
+            name: 'user',
+            message: 'Username:'
+        },
+        {
+            type: 'password',
+            name: 'pass',
+            message: 'Password'
+        }
+    ]).then(function (creds) {
+        sqlPool.getConnection(function (err, connection) {
+            connection.query('SELECT * FROM bamazon.accounts', function (err, data, fields) {
+                // loop through the returned table and check for a match
+                data.forEach(function (each) {
+                    // release connection since we're done
+                    connection.release();
+
+                    if (creds.user === each.user && creds.pass === each.pass) {
+                        // let them in
+                        managerOptions();
+                    } else {
+                        // alert its wrong, give them another try
+                        console.log('Username or Password Incorrect!');
+                        checkCreds();
+                    }
+                });
             });
         });
     });
@@ -324,7 +364,7 @@ function addNewProduct() {
             case 'Customer':
                 return listInventory(placeOrder);
             case 'Manager':
-                return managerOptions();
+                return checkCreds();
             default:
                 console.log('Error in menu selection... Aborting.');
                 sqlPool.end();
