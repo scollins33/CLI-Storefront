@@ -265,18 +265,43 @@ function addNewProduct() {
     inquirer.prompt([
         {
             // product name
+            type: 'input',
+            name: 'name',
+            message: 'New product name?'
         },
         {
             // product department
+            type: 'input',
+            name: 'dept',
+            message: 'What department?'
         },
         {
             // product price
+            type: 'input',
+            name: 'price',
+            message: 'How much per unit?'
         },
         {
             // product starting stock
+            type: 'input',
+            name: 'stock',
+            message: 'How many units to start with?'
         }
-    ]).then(function () {
+    ]).then(function (answers) {
+        sqlPool.getConnection(function (err, connection) {
+            connection.query('INSERT INTO bamazon.products (product_name, department_name, price, stock_quantity) VALUES (?, ?, ?, ?)',
+                [answers.name, answers.dept, answers.price, answers.stock], function (err, data, fields) {
+                    if (err) { console.log(err); connection.release(); }
 
+                    console.log(`${answers.stock} of ${answers.name} have been created in inventory`);
+
+                    // release connection since we're done
+                    connection.release();
+
+                    // loop back to options menu
+                    managerOptions();
+            });
+        });
     });
 }
 
